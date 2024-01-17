@@ -1,0 +1,118 @@
+name: maven hello world
+
+on:
+  push:
+    branches:
+      - DevOpsExercise
+
+jobs:
+  build:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Increase Patch version
+        working-directory: ./myapp
+        run: |
+          # # Extract the current version from the pom.xml
+          CURRENT_VERSION=$(xmllint --xpath "//*[local-name()='project']/*[local-name()='version']/text()" pom.xml)
+          echo $CURRENT_VERSION
+
+          # # Extract the major, minor and patch
+          MAJOR=$(echo "$CURRENT_VERSION" | awk -F. '{print $1}')
+          MINOR=$(echo "$CURRENT_VERSION" | awk -F. '{print $2}')
+          PATCH=$(echo "$CURRENT_VERSION" | awk -F. '{print $3}')
+          
+          # # Increase the patch version
+          NEW_PATCH=$((PATCH + 1))
+          NEW_JAR_VERSION=$MAJOR.$MINOR.$NEW_PATCH
+          echo $NEW_JAR_VERSION
+          echo "new_jar_tag=${NEW_JAR_VERSION}" >> "$GITHUB_ENV"
+          echo $NEW_JAR_VERSION >> newversion.txt
+
+          # # # Update the version in the pom.xml
+          sed -i "s/<version>$CURRENT_VERSION<\/version>/<version>$MAJOR.$MINOR.$NEW_PATCH<\/version>/" pom.xml
+        shell: bash
+
+      - name: Upload Environment File
+        uses: actions/upload-artifact@v2
+        with:
+          name: newversion
+          path: myapp/newversion.txt
+
+      - name: Compile code and package artifact
+        working-directory: ./myapp
+        run: |
+          mvn clean install
+        
+      - name: Create artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: myapp-artifact
+          path: ${{ github.workspace }}/myapp/target/*.jar
+  
+  publish:
+    runs-on: self-hosted
+    needs: build
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Download JAR
+        uses: actions/download-artifact@v3
+        with:
+          name: myapp-artifact
+          path: ${{ github.workspace }}/myapp/target/  
+
+      - name: Download Environment File
+        uses: actions/download-artifact@v2
+        with:
+          name: newversion
+
+      - name: Use tag variable
+        run : |
+          echo "new_tag_version=$(cat newversion.txt)" >> "$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub for upload
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}       
+
+      - name: Run the build process with Docker
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_REPOSITORY }}/myapp-image:${{ env.new_tag_version }}
+
+  deploy:
+    runs-on: self-hosted
+    needs: publish
+    steps:
+
+      - name: Download Environment File
+        uses: actions/download-artifact@v2
+        with:
+          name: newversion
+
+      - name: Use tag variable
+        run : |
+          echo "new_tag_version=$(cat newversion.txt)" >> "$GITHUB_ENV"
+
+      - name: Login to Docker Hub for use the image
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Run the build process with Docker
+        uses: addnab/docker-run-action@v3
+        with:
+            image: ${{ secrets.DOCKERHUB_REPOSITORY }}/myapp-image:${{ env.new_tag_version }}
