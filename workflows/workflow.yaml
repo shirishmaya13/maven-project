@@ -1,9 +1,7 @@
 name: maven hello world
 
 on:
-  push:
-    branches:
-      - DevOpsExercise
+  push
 
 jobs:
   build:
