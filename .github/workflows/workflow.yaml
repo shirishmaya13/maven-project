@@ -43,7 +43,7 @@ jobs:
       - name: Compile code and package artifact
         working-directory: ./myapp
         run: |
-          mvn clean install
+          mvn clean package
         
       - name: Create artifact
         uses: actions/upload-artifact@v3
